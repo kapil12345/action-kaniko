@@ -1,0 +1,109 @@
+##################################################
+# Name: release.yaml
+# Description: Workflow to create and publish to a GitHub release
+##################################################
+
+name: Release
+
+on:
+
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+
+env:
+
+  PROJECT: ${{ github.repository }}
+
+defaults:
+
+  run:
+    shell: bash
+
+jobs:
+
+  #########################
+  # Create a GitHub Release
+  #########################
+
+  create_release:
+
+    name: Create Release
+
+    runs-on: ${{ matrix.os }}
+
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: true
+      matrix:
+        os:
+          - ubuntu-latest
+
+    steps:
+
+      - id: checkout_repository
+        name: Checkout repository with all history and tags
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          submodules: false
+          clean: true
+
+      - id: checkout_action-kaniko
+        name: Checkout Private Action (action-kaniko)
+        uses: actions/checkout@v2
+        with:
+          repository: salt-labs/action-kaniko
+          ref: refs/heads/master
+          token: ${{ secrets.PAT_GITHUB_REPOS }}
+          path: ./.github/actions/action-kaniko
+
+      - id: prep_release
+        name: Prepare for Release
+        uses: salt-labs/action-release-prep@master
+        with:
+          loglevel: "INFO"
+          tag_enable: "TRUE"
+          tag_force: "FALSE"
+          git_pretty_format: "* %h %G? %aN - %s"
+          calver_scheme: "YYYY.MM.GEN"
+          calver_split: "."
+          calver_split_mod: "."
+          timezone: "Australia/Sydney"
+
+      - id: publish_package
+        name: Publish Package
+        #uses: salt-labs/action-kaniko@master
+        uses: ./.github/actions/action-kaniko
+        with:
+          registry: docker.io
+          registry_namespace: ${{ secrets.DOCKERHUB_NAMESPACE }}
+          registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          registry_password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          image_tag: ${{ steps.prep_release.outputs.calver }}
+          image_tag_extra: true
+          cache_enabled: false
+          extra_args: >
+            --reproducible
+            --cleanup
+            --verbosity info
+            --build-arg VERSION=${{ steps.prep_release.outputs.calver }}
+
+      - id: create_release
+        name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.prep_release.outputs.calver }}
+          release_name: ${{ steps.prep_release.outputs.calver }}
+          body: |
+            # Changelog
+
+            ${{ steps.prep_release.outputs.changelog }}
+          draft: false
+          prerelease: false

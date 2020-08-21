@@ -1,0 +1,192 @@
+##################################################
+# Name: kaniko.yaml
+# Description: Workflow to build containers with Kaniko
+##################################################
+
+name: Kaniko
+
+on:
+
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+
+  pull_request:
+    branches:
+      - master
+      - release/*
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - review_requested
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+
+env:
+
+  PROJECT: ${{ github.repository }}
+
+defaults:
+
+  run:
+    shell: bash
+
+jobs:
+
+  #########################
+  # Perform basic container tests
+  #########################
+
+  test_container:
+
+    name: Test Container
+
+    runs-on: ${{ matrix.os }}
+
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: true
+      matrix:
+        os:
+          - ubuntu-latest
+
+    steps:
+
+      - id: checkout_repository
+        name: Checkout repository
+        uses: actions/checkout@v2
+
+      - id: pull_request_source_dest_branch
+        name: Pull request source and destination branch
+        env:
+          BRANCH_SOURCE: ${{ github.head_ref }}
+          BRANCH_DEST: ${{ github.base_ref }}
+        run: |
+          echo "Pull Request Source: ${BRANCH_SOURCE}"
+          echo "Pull Request Destination: ${BRANCH_DEST}"
+        if: github.event_name == 'pull_request'
+
+      - id: docker_build
+        name: Docker Image Build
+        run: >
+          docker image build
+          --rm
+          --tag test:latest
+          .
+
+      - id: docker_test
+        name: Docker Container Test
+        run: >
+          docker container run
+          --rm
+          --name test
+          test:latest
+
+      # Turtles all the way down
+      - id: action_test
+        name: Action Test
+        uses: ./
+        with:
+          loglevel: "DEBUG"
+          registry: docker.io
+          registry_namespace: ${{ secrets.DOCKERHUB_NAMESPACE }}
+          registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          registry_password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          image_tag_extra: true
+          cache_enabled: true
+          extra_args: >
+            --reproducible
+            --cleanup
+            --verbosity info
+            --build-arg VERSION=latest
+            --no-push
+
+  #########################
+  # Push container to Docker.io registry
+  #########################
+
+  publish_package_docker:
+
+    name: Publish package to docker.io
+
+    needs: test_container
+
+    # Don't run on pushes to the master branch
+    if: ${{ github.event_name != 'push' && github.ref != 'refs/head/master' }}
+
+    runs-on: ${{ matrix.os }}
+
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: true
+      matrix:
+        os:
+          - ubuntu-latest
+
+    steps:
+
+      - id: checkout_repository
+        name: Checkout repository with all history and tags
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          submodules: false
+          clean: true
+
+      # Required until the project is OSS
+      #- id: checkout_action-kaniko
+      #  name: Checkout Private Action (action-kaniko)
+      #  uses: actions/checkout@v2
+      #  with:
+      #    repository: salt-labs/action-kaniko
+      #    ref: refs/heads/master
+      #    token: ${{ secrets.PAT_GITHUB_REPOS }}
+      #    path: ./.github/actions/action-kaniko
+
+      # Attempt to publish using the Kaniko Cache
+      - id: publish_package_cache
+        name: Publish Package (Cache Enabled)
+        uses: docker://docker.io/saltlabs/action-kaniko:stable
+        #uses: salt-labs/action-kaniko@master
+        #uses: ./.github/actions/action-kaniko
+        with:
+          registry: docker.io
+          registry_namespace: ${{ secrets.DOCKERHUB_NAMESPACE }}
+          registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          registry_password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          image_tag_extra: true
+          cache_enabled: true
+          extra_args: >
+            --reproducible
+            --cleanup
+            --verbosity info
+            --build-arg VERSION=latest
+        continue-on-error: true
+
+      # Take another stab with the Kaniko Cache disabled
+      - id: publish_package_cache_disabled
+        name: Publish Package (Cache Disabled)
+        uses: docker://docker.io/saltlabs/action-kaniko:stable
+        #uses: salt-labs/action-kaniko@master
+        #uses: ./.github/actions/action-kaniko
+        if: ${{ steps.publish_package_cache.outcome == 'failure' }}
+        with:
+          registry: docker.io
+          registry_namespace: ${{ secrets.DOCKERHUB_NAMESPACE }}
+          registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          registry_password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          image_tag_extra: true
+          cache_enabled: false
+          extra_args: >
+            --reproducible
+            --cleanup
+            --verbosity info
+            --build-arg VERSION=latest

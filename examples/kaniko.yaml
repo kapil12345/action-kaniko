@@ -1,0 +1,56 @@
+##################################################
+# Name: kaniko.yaml
+# Description: Workflow to build containers with Kaniko
+##################################################
+
+name: Kaniko
+
+on:
+
+  pull_request:
+    branches:
+      - master
+      - release/*
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - review_requested
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+
+jobs:
+
+  kaniko_build:
+
+    name: Kaniko Build
+
+    runs-on: "${{ matrix.os }}"
+
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: true
+      matrix:
+        os:
+          - ubuntu-latest
+
+    steps:
+
+      - id: checkout_repository
+        name: Checkout Repository
+        uses: actions/checkout@master
+
+      - id: kaniko_build
+        name: Kaniko build
+        #uses: salt-labs/action-kaniko@master
+        uses: docker://docker.io/saltlabs/action-kaniko:stable
+        with:
+          registry: docker.io
+          registry_namespace: "${{ secrets.CR_ORG }}"
+          registry_username: "${{ secrets.CR_USER }}"
+          registry_password: "${{ secrets.CR_PAT }}"
+          cache: true
+          cache_registry: cache
