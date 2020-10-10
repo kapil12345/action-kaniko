@@ -31,7 +31,7 @@ jobs:
 
       - id: stale
         name: Check for Stale issues and pull requests
-        uses: actions/stale@v3.0.10
+        uses: actions/stale@v3.0.12
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           stale-issue-message: 'Marking issue as stale due to a lack of activity'
