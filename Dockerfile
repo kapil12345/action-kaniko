@@ -1,5 +1,5 @@
 ##################################################
-# Notes for GitHub Actions
+## Notes for GitHub Actions
 #       * Dockerfile instructions: https://git.io/JfGwP
 #       * Environment variables: https://git.io/JfGw5
 ##################################################
